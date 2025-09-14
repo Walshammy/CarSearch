@@ -1,0 +1,6 @@
+title,year,model,price,mileage,scraped_date,fuel_efficiency_l_100km,annual_fuel_cost,fuel_efficiency_filled,value_score
+2014 Subaru XV 2.0i,2014,XV/Crosstrek,11500,145000,2025-09-15,8.2,2952.0,8.2,42.4
+2013 Subaru Impreza XV,2013,XV/Crosstrek,10200,165000,2025-09-15,8.2,2952.0,8.2,43.099999999999994
+2015 Subaru Impreza 2.0i,2015,Impreza,12000,125000,2025-09-15,,,10.0,44.5
+2012 Subaru Forester 2.5X,2012,Forester,9800,175000,2025-09-15,9.8,3528.0,9.8,46.900000000000006
+2011 Subaru Outback 2.5i,2011,Outback,8900,185000,2025-09-15,10.2,3672.0,10.2,47.8
