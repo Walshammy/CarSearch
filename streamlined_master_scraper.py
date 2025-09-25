@@ -30,9 +30,13 @@ class StreamlinedMasterScraper:
             'Subaru BRZ': 'https://www.trademe.co.nz/a/motors/cars/subaru/brz'
         }
         
-        # Output directory (main folder)
-        self.output_dir = r"C:\Users\james\Downloads\CarSearch\CarSearch"
+        # Output directory (main CarSearch folder)
+        self.output_dir = r"C:\Users\james\Downloads\CarSearch"
         os.makedirs(self.output_dir, exist_ok=True)
+        
+        # Daily backups directory
+        self.daily_backups_dir = os.path.join(self.output_dir, "daily_backups")
+        os.makedirs(self.daily_backups_dir, exist_ok=True)
         
         # OneDrive backup directory
         self.onedrive_dir = r"C:\Users\james\OneDrive - Silverdale Medical Limited\CarSearch"
@@ -560,12 +564,20 @@ class StreamlinedMasterScraper:
         return value
 
     def clean_mileage(self, value):
-        """Clean mileage value - extract number from text like '50,000 km'"""
+        """Clean mileage value - extract number from text like '50,000 km' or just numbers"""
         if pd.isna(value) or value == 'N/A' or value == '':
             return ''  # Return blank for empty/invalid values
         
         try:
-            # Look for number followed by 'km'
+            # If it's already a number, return it
+            if isinstance(value, (int, float)):
+                return int(value)
+            
+            # If it's a string that's already just a number, convert it
+            if str(value).replace(',', '').isdigit():
+                return int(str(value).replace(',', ''))
+            
+            # Look for number followed by 'km' (for cases where extraction didn't work)
             match = re.search(r'([\d,]+)\s*km', str(value), re.IGNORECASE)
             if match:
                 # Remove commas and convert to number
@@ -776,8 +788,16 @@ class StreamlinedMasterScraper:
                     # Number formatting for mileage column
                     for row in range(2, ws.max_row + 1):
                         kms_cell = ws.cell(row=row, column=col)
-                        if isinstance(kms_cell.value, (int, float)) and kms_cell.value != '':
-                            kms_cell.number_format = '#,##0'  # Number format with commas
+                        # Apply number formatting to all kms cells (even if they appear as text)
+                        if kms_cell.value is not None and kms_cell.value != '':
+                            try:
+                                # Convert to number if it's a string that looks like a number
+                                if isinstance(kms_cell.value, str) and kms_cell.value.replace(',', '').isdigit():
+                                    kms_cell.value = int(kms_cell.value.replace(',', ''))
+                                kms_cell.number_format = '#,##0'  # Number format with commas
+                            except:
+                                # If conversion fails, leave as is
+                                pass
             
             # Auto-adjust column widths with better formatting
             for column in ws.columns:
@@ -889,12 +909,23 @@ class StreamlinedMasterScraper:
         filepath = self.master_file
         
         try:
+            # Create timestamped filename for daily backup
+            timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+            daily_backup_file = os.path.join(self.daily_backups_dir, f"86_BRZ_dataset_{timestamp}.xlsx")
+            
             # Save main file
             df.to_excel(filepath, index=False, engine='openpyxl')
             self.logger.info(f"86/BRZ dataset saved to: {filepath}")
             
             # Apply conditional formatting to main file
             self.apply_conditional_formatting(filepath)
+            
+            # Save daily timestamped backup
+            df.to_excel(daily_backup_file, index=False, engine='openpyxl')
+            self.logger.info(f"Daily backup saved to: {daily_backup_file}")
+            
+            # Apply conditional formatting to daily backup
+            self.apply_conditional_formatting(daily_backup_file)
             
             # Save backup copy to OneDrive
             df.to_excel(self.onedrive_file, index=False, engine='openpyxl')
@@ -912,6 +943,7 @@ class StreamlinedMasterScraper:
                 count = len(df[df['car_model'] == model])
                 print(f"{model}: {count} listings")
             print(f"Main dataset: {self.master_file}")
+            print(f"Daily backup: {daily_backup_file}")
             print(f"OneDrive backup: {self.onedrive_file}")
             
         except Exception as e:
