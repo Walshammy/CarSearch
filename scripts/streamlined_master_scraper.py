@@ -1,0 +1,374 @@
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+import pandas as pd
+import time
+import os
+from datetime import datetime
+import logging
+import hashlib
+import re
+from openpyxl import load_workbook
+from openpyxl.styles import PatternFill, Font, Alignment
+
+class StreamlinedMasterScraper:
+    def __init__(self):
+        # Setup logging
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+        self.logger = logging.getLogger(__name__)
+        
+        # Setup Chrome options
+        self.chrome_options = Options()
+        self.chrome_options.add_argument('--headless')
+        self.chrome_options.add_argument('--no-sandbox')
+        self.chrome_options.add_argument('--disable-dev-shm-usage')
+        self.chrome_options.add_argument('--window-size=1920,1080')
+        
+        # URLs to scrape
+        self.urls = {
+            'Toyota 86': 'https://www.trademe.co.nz/a/motors/cars/toyota/86',
+            'Subaru BRZ': 'https://www.trademe.co.nz/a/motors/cars/subaru/brz'
+        }
+        
+        # Output directory (main folder - one level up from scripts)
+        self.output_dir = r"C:\Users\james\Downloads\CarSearch"
+        os.makedirs(self.output_dir, exist_ok=True)
+        
+        # OneDrive backup directory
+        self.onedrive_dir = r"C:\Users\james\OneDrive - Silverdale Medical Limited\CarSearch"
+        os.makedirs(self.onedrive_dir, exist_ok=True)
+        
+        # 86/BRZ dataset file (saved directly in main folder, no subfolder)
+        self.master_file = os.path.join(self.output_dir, "86_BRZ_dataset.xlsx")
+        
+        # OneDrive backup file
+        self.onedrive_file = os.path.join(self.onedrive_dir, "86_BRZ_dataset.xlsx")
+
+    def generate_unique_id(self, title, location, year):
+        """Generate a unique ID based on listing characteristics"""
+        unique_string = f"{title}_{location}_{year}_{datetime.now().strftime('%Y%m%d')}"
+        return hashlib.md5(unique_string.encode()).hexdigest()[:12].upper()
+
+    def extract_listing_data(self, listing_element, car_model):
+        """Extract comprehensive data from a single listing element"""
+        try:
+            data = {}
+            
+            # Get the full text content
+            full_text = listing_element.text.strip()
+            
+            if not full_text or len(full_text) < 20:
+                return None
+            
+            # Split into lines
+            lines = [line.strip() for line in full_text.split('\n') if line.strip()]
+            
+            # Basic info
+            data['title'] = lines[0] if lines else 'N/A'
+            
+            # Extract year
+            year = 'N/A'
+            if data['title'] != 'N/A':
+                words = data['title'].split()
+                for word in words:
+                    if word.isdigit() and len(word) == 4 and 1900 < int(word) < 2030:
+                        year = word
+                        break
+            data['year'] = year
+            
+            # Extract brand
+            data['brand'] = car_model.split()[0]  # Toyota or Subaru
+            
+            # Extract mileage
+            mileage_text = 'N/A'
+            for line in lines:
+                if 'km' in line.lower() and any(char.isdigit() for char in line):
+                    mileage_text = line
+                    break
+            data['kms'] = mileage_text
+            
+            # Extract location
+            location_text = 'N/A'
+            for line in lines:
+                if any(word in line.lower() for word in ['city', 'auckland', 'wellington', 'christchurch', 'hamilton', 'tauranga', 'dunedin']):
+                    location_text = line
+                    break
+            data['location'] = location_text
+            
+            # Generate unique ID
+            data['ID'] = self.generate_unique_id(data['title'], data['location'], data['year'])
+            
+            # Extract price information
+            price_text = 'N/A'
+            for line in lines:
+                if '$' in line and any(char.isdigit() for char in line):
+                    price_text = line
+                    break
+            data['price'] = price_text
+            
+            # Determine if it's an auction
+            is_auction = any(word in full_text.lower() for word in ['auction', 'bid', 'reserve', 'ending'])
+            data['is_auction'] = is_auction
+            data['price_type'] = 'Auction' if is_auction else 'Buy Now'
+            
+            # Determine seller type
+            is_dealer = any(word in full_text.lower() for word in ['dealer', 'motors', 'cars', 'auto', 'ltd', 'limited'])
+            data['seller_type'] = 'Dealer' if is_dealer else 'Private'
+            data['is_dealer'] = is_dealer
+            
+            # Additional fields
+            data['car_model'] = car_model
+            data['listing_url'] = 'N/A'
+            data['listing_id'] = 'N/A'
+            data['transmission'] = 'N/A'
+            data['fuel_type'] = 'N/A'
+            data['body_style'] = 'N/A'
+            data['scrape_date'] = datetime.now().strftime('%Y-%m-%d')
+            data['scrape_time'] = datetime.now().strftime('%H:%M:%S')
+            data['last_seen'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            data['is_active'] = True
+            
+            return data
+            
+        except Exception as e:
+            self.logger.error(f"Error extracting listing data: {e}")
+            return None
+
+    def scrape_car_listings(self, car_model, url):
+        """Scrape listings for a specific car model"""
+        self.logger.info(f"Starting scrape for {car_model}")
+        
+        driver = webdriver.Chrome(options=self.chrome_options)
+        all_listings = []
+        
+        try:
+            # Navigate to the page
+            driver.get(url)
+            self.logger.info(f"Navigated to: {url}")
+            
+            # Wait for page to load
+            time.sleep(5)
+            
+            # Look for listings
+            listings = driver.find_elements(By.CSS_SELECTOR, '.tm-motors-tier-one-search-card__listing-details-container')
+            
+            if not listings:
+                self.logger.warning(f"No listings found for {car_model}")
+                return all_listings
+            
+            self.logger.info(f"Found {len(listings)} listings for {car_model}")
+            
+            # Extract data from each listing
+            for i, listing in enumerate(listings[:20]):  # Limit to first 20 listings
+                try:
+                    listing_data = self.extract_listing_data(listing, car_model)
+                    if listing_data:
+                        all_listings.append(listing_data)
+                        self.logger.info(f"Extracted listing {i+1}: {listing_data.get('title', 'N/A')[:50]}...")
+                except Exception as e:
+                    self.logger.error(f"Error processing listing {i+1}: {e}")
+                    continue
+            
+            self.logger.info(f"Successfully extracted {len(all_listings)} listings for {car_model}")
+            
+        except Exception as e:
+            self.logger.error(f"Error scraping {car_model}: {e}")
+        
+        finally:
+            driver.quit()
+        
+        return all_listings
+
+    def load_existing_dataset(self):
+        """Load existing master dataset if it exists"""
+        if os.path.exists(self.master_file):
+            try:
+                df = pd.read_excel(self.master_file)
+                self.logger.info(f"Loaded existing dataset with {len(df)} records")
+                return df
+            except Exception as e:
+                self.logger.error(f"Error loading existing dataset: {e}")
+                return pd.DataFrame()
+        else:
+            self.logger.info("No existing dataset found, creating new one")
+            return pd.DataFrame()
+
+    def update_dataset(self, new_data):
+        """Update the master dataset with new data"""
+        # Load existing data
+        existing_df = self.load_existing_dataset()
+        
+        if existing_df.empty:
+            # Create new dataset
+            updated_df = pd.DataFrame(new_data)
+        else:
+            # Update existing dataset
+            new_df = pd.DataFrame(new_data)
+            
+            # Mark existing listings as potentially inactive
+            existing_df['is_active'] = False
+            
+            # Add new data
+            updated_df = pd.concat([new_df, existing_df], ignore_index=True)
+            
+            # Remove duplicates based on ID, keeping the most recent
+            updated_df = updated_df.drop_duplicates(subset=['ID'], keep='first')
+        
+        return updated_df
+
+    def apply_conditional_formatting(self, filepath):
+        """Apply beautiful conditional formatting to the Excel file"""
+        try:
+            wb = load_workbook(filepath)
+            ws = wb.active
+            
+            # Define beautiful colors
+            header_fill = PatternFill(start_color="2F4F4F", end_color="2F4F4F", fill_type="solid")  # Dark slate gray
+            header_font = Font(bold=True, color="FFFFFF")  # White bold text
+            
+            active_id_fill = PatternFill(start_color="E6FFE6", end_color="E6FFE6", fill_type="solid")  # Light green for ID column
+            inactive_id_fill = PatternFill(start_color="F0F0F0", end_color="F0F0F0", fill_type="solid")  # Light gray for inactive ID column
+            inactive_row_fill = PatternFill(start_color="F8F8F8", end_color="F8F8F8", fill_type="solid")  # Very light gray for inactive rows
+            
+            # Style the header row (row 1)
+            for col in range(1, ws.max_column + 1):
+                cell = ws.cell(row=1, column=col)
+                cell.fill = header_fill
+                cell.font = header_font
+                cell.alignment = Alignment(horizontal='center', vertical='center')
+            
+            # Find the is_active column
+            header_row = 1
+            is_active_col = None
+            for col in range(1, ws.max_column + 1):
+                if ws.cell(row=header_row, column=col).value == 'is_active':
+                    is_active_col = col
+                    break
+            
+            if is_active_col:
+                # Apply formatting based on is_active column
+                for row in range(2, ws.max_row + 1):
+                    is_active_cell = ws.cell(row=row, column=is_active_col)
+                    
+                    if is_active_cell.value == True:
+                        # Active listing - light green ID column only
+                        ws.cell(row=row, column=1).fill = active_id_fill  # ID column (column 1)
+                    else:
+                        # Inactive listing - light gray ID column and slightly lighter row
+                        ws.cell(row=row, column=1).fill = inactive_id_fill  # ID column
+                        # Make the entire row slightly lighter
+                        for col in range(1, ws.max_column + 1):
+                            ws.cell(row=row, column=col).fill = inactive_row_fill
+            
+            # Auto-adjust column widths
+            for column in ws.columns:
+                max_length = 0
+                column_letter = column[0].column_letter
+                for cell in column:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except:
+                        pass
+                adjusted_width = min(max_length + 2, 50)  # Cap at 50 characters
+                ws.column_dimensions[column_letter].width = adjusted_width
+            
+            wb.save(filepath)
+            self.logger.info("Applied beautiful conditional formatting to Excel file")
+            
+        except Exception as e:
+            self.logger.error(f"Error applying conditional formatting: {e}")
+
+    def save_master_dataset(self, df):
+        """Save the master dataset with proper formatting"""
+        if df.empty:
+            self.logger.warning("No data to save")
+            return
+        
+        # Reorder columns as requested: ID, brand, year, kms, price, location
+        column_order = [
+            'ID', 'brand', 'year', 'kms', 'price', 'location', 'price_type', 
+            'is_auction', 'seller_type', 'is_dealer', 'title', 'car_model', 
+            'is_active', 'last_seen', 'scrape_date', 'scrape_time', 
+            'listing_url', 'listing_id', 'transmission', 'fuel_type', 'body_style'
+        ]
+        
+        # Only keep columns that exist in the data
+        existing_columns = [col for col in column_order if col in df.columns]
+        df = df[existing_columns]
+        
+        # Sort by most recent first
+        df = df.sort_values(['scrape_date', 'last_seen'], ascending=[False, False])
+        
+        # Save to Excel (no timestamped copies, just update the master file)
+        filepath = self.master_file
+        
+        try:
+            # Save main file
+            df.to_excel(filepath, index=False, engine='openpyxl')
+            self.logger.info(f"86/BRZ dataset saved to: {filepath}")
+            
+            # Apply conditional formatting to main file
+            self.apply_conditional_formatting(filepath)
+            
+            # Save backup copy to OneDrive
+            df.to_excel(self.onedrive_file, index=False, engine='openpyxl')
+            self.logger.info(f"86/BRZ dataset backup saved to: {self.onedrive_file}")
+            
+            # Apply conditional formatting to OneDrive backup
+            self.apply_conditional_formatting(self.onedrive_file)
+            
+            # Print summary
+            print(f"\n=== 86/BRZ Dataset Summary ===")
+            print(f"Total listings: {len(df)}")
+            print(f"Active listings: {len(df[df['is_active'] == True])}")
+            print(f"Inactive listings: {len(df[df['is_active'] == False])}")
+            for model in df['car_model'].unique():
+                count = len(df[df['car_model'] == model])
+                print(f"{model}: {count} listings")
+            print(f"Main dataset: {self.master_file}")
+            print(f"OneDrive backup: {self.onedrive_file}")
+            
+        except Exception as e:
+            self.logger.error(f"Error saving master dataset: {e}")
+
+    def scrape_all_cars(self):
+        """Scrape listings for all car models"""
+        all_data = []
+        
+        for car_model, url in self.urls.items():
+            listings = self.scrape_car_listings(car_model, url)
+            all_data.extend(listings)
+            time.sleep(2)  # Delay between requests
+        
+        return all_data
+
+    def run(self):
+        """Main execution method"""
+        self.logger.info("Starting 86/BRZ Dataset Scraper")
+        start_time = datetime.now()
+        
+        try:
+            # Scrape all car data
+            new_data = self.scrape_all_cars()
+            
+            # Update master dataset
+            updated_df = self.update_dataset(new_data)
+            
+            # Save master dataset
+            self.save_master_dataset(updated_df)
+            
+            end_time = datetime.now()
+            duration = end_time - start_time
+            self.logger.info(f"Master dataset update completed in {duration}")
+            
+        except Exception as e:
+            self.logger.error(f"Error during master dataset update: {e}")
+
+def main():
+    """Main function to run the master scraper"""
+    scraper = StreamlinedMasterScraper()
+    scraper.run()
+
+if __name__ == "__main__":
+    main()
