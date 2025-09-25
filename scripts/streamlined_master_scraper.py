@@ -319,6 +319,22 @@ class StreamlinedMasterScraper:
                 cell.font = header_font
                 cell.alignment = Alignment(horizontal='center', vertical='center')
             
+            # Set default alignment for all data cells
+            for row in range(2, ws.max_row + 1):
+                for col in range(1, ws.max_column + 1):
+                    cell = ws.cell(row=row, column=col)
+                    column_letter = cell.column_letter
+                    
+                    # Set alignment based on column type
+                    if column_letter in ['A', 'C', 'D', 'E', 'H', 'J', 'M']:  # ID, Year, Kms, Price, Is auction, Is dealer, Is active
+                        cell.alignment = Alignment(horizontal='center', vertical='center')
+                    elif column_letter in ['B', 'F', 'G', 'I', 'L', 'N', 'O', 'P', 'R', 'S', 'T', 'U']:  # Text columns
+                        cell.alignment = Alignment(horizontal='left', vertical='center')
+                    elif column_letter in ['K', 'Q']:  # Title and URL columns (long text)
+                        cell.alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
+                    else:
+                        cell.alignment = Alignment(horizontal='left', vertical='center')
+            
             # Find the is_active and brand columns
             header_row = 1
             is_active_col = None
@@ -370,25 +386,88 @@ class StreamlinedMasterScraper:
                     price_col = col
                     break
             
-            if price_col:
-                for row in range(2, ws.max_row + 1):
-                    price_cell = ws.cell(row=row, column=price_col)
-                    # Only apply currency format if the value is a number
-                    if isinstance(price_cell.value, (int, float)) and price_cell.value != '-':
-                        price_cell.number_format = '$#,##0'  # Currency format with $ symbol
+            # Apply number formatting to appropriate columns
+            for col in range(1, ws.max_column + 1):
+                column_name = ws.cell(row=1, column=col).value
+                
+                if column_name == 'price':
+                    # Currency formatting for price column
+                    for row in range(2, ws.max_row + 1):
+                        price_cell = ws.cell(row=row, column=col)
+                        if isinstance(price_cell.value, (int, float)) and price_cell.value != '-':
+                            price_cell.number_format = '$#,##0'  # Currency format with $ symbol
+                
+                elif column_name == 'year':
+                    # Number formatting for year column
+                    for row in range(2, ws.max_row + 1):
+                        year_cell = ws.cell(row=row, column=col)
+                        if isinstance(year_cell.value, (int, float)):
+                            year_cell.number_format = '0'  # Integer format
+                
+                elif column_name == 'kms':
+                    # Number formatting for mileage column
+                    for row in range(2, ws.max_row + 1):
+                        kms_cell = ws.cell(row=row, column=col)
+                        if isinstance(kms_cell.value, (int, float)):
+                            kms_cell.number_format = '#,##0'  # Number format with commas
             
-            # Auto-adjust column widths
+            # Auto-adjust column widths with better formatting
             for column in ws.columns:
                 max_length = 0
                 column_letter = column[0].column_letter
+                
+                # Calculate max length for this column
                 for cell in column:
                     try:
-                        if len(str(cell.value)) > max_length:
-                            max_length = len(str(cell.value))
+                        if cell.value is not None:
+                            # For headers, use the header text length
+                            if cell.row == 1:
+                                max_length = max(max_length, len(str(cell.value)))
+                            else:
+                                # For data cells, consider the actual content length
+                                cell_length = len(str(cell.value))
+                                max_length = max(max_length, cell_length)
                     except:
                         pass
-                adjusted_width = min(max_length + 2, 50)  # Cap at 50 characters
-                ws.column_dimensions[column_letter].width = adjusted_width
+                
+                # Set minimum widths for different column types
+                min_widths = {
+                    'A': 8,   # ID column
+                    'B': 10,  # Brand column
+                    'C': 6,   # Year column
+                    'D': 12,  # Kms column
+                    'E': 12,  # Price column
+                    'F': 20,  # Location column
+                    'G': 15,  # Price type column
+                    'H': 10,  # Is auction column
+                    'I': 15,  # Seller type column
+                    'J': 10,  # Is dealer column
+                    'K': 30,  # Title column
+                    'L': 15,  # Car model column
+                    'M': 10,  # Is active column
+                    'N': 15,  # Last seen column
+                    'O': 15,  # Scrape date column
+                    'P': 15,  # Scrape time column
+                    'Q': 50,  # Listing URL column
+                    'R': 15,  # Listing ID column
+                    'S': 12,  # Transmission column
+                    'T': 12,  # Fuel type column
+                    'U': 15   # Body style column
+                }
+                
+                # Get the minimum width for this column
+                min_width = min_widths.get(column_letter, 10)
+                
+                # Calculate final width (max of calculated length + 2, minimum width, but cap at 60)
+                final_width = max(max_length + 2, min_width)
+                final_width = min(final_width, 60)  # Cap at 60 characters
+                
+                ws.column_dimensions[column_letter].width = final_width
+                
+                # Enable text wrapping for long content columns
+                if column_letter in ['K', 'Q']:  # Title and URL columns
+                    for cell in column:
+                        cell.alignment = Alignment(wrap_text=True, vertical='top')
             
             wb.save(filepath)
             self.logger.info("Applied beautiful conditional formatting to Excel file")
