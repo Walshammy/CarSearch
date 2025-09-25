@@ -216,6 +216,84 @@ class StreamlinedMasterScraper:
         
         return updated_df
 
+    def clean_and_format_data(self, df):
+        """Clean and format data for proper Excel number formatting"""
+        try:
+            # Create a copy to avoid modifying original
+            cleaned_df = df.copy()
+            
+            # Clean year column - convert to numbers if possible
+            cleaned_df['year'] = cleaned_df['year'].apply(lambda x: self.clean_number(x, 'year'))
+            
+            # Clean mileage column - extract numbers from text like "50,000 km"
+            cleaned_df['kms'] = cleaned_df['kms'].apply(lambda x: self.clean_mileage(x))
+            
+            # Clean price column - extract numbers from text like "$25,000"
+            cleaned_df['price'] = cleaned_df['price'].apply(lambda x: self.clean_price(x))
+            
+            self.logger.info("Data cleaned and formatted for Excel")
+            return cleaned_df
+            
+        except Exception as e:
+            self.logger.error(f"Error cleaning data: {e}")
+            return df
+
+    def clean_number(self, value, column_type):
+        """Clean a number value, return number if valid, otherwise return original"""
+        if pd.isna(value) or value == 'N/A' or value == '':
+            return value
+        
+        try:
+            # Remove any non-digit characters except decimal point
+            cleaned = str(value).replace(',', '').replace(' ', '')
+            # Extract just the number part
+            number_match = re.search(r'(\d+(?:\.\d+)?)', cleaned)
+            if number_match:
+                number = float(number_match.group(1))
+                if column_type == 'year':
+                    # For years, return as integer if it's a reasonable year
+                    if 1900 <= number <= 2030:
+                        return int(number)
+                return number
+        except:
+            pass
+        
+        return value
+
+    def clean_mileage(self, value):
+        """Clean mileage value - extract number from text like '50,000 km'"""
+        if pd.isna(value) or value == 'N/A' or value == '':
+            return value
+        
+        try:
+            # Look for number followed by 'km'
+            match = re.search(r'([\d,]+)\s*km', str(value), re.IGNORECASE)
+            if match:
+                # Remove commas and convert to number
+                number_str = match.group(1).replace(',', '')
+                return int(number_str)
+        except:
+            pass
+        
+        return value
+
+    def clean_price(self, value):
+        """Clean price value - extract number from text like '$25,000'"""
+        if pd.isna(value) or value == 'N/A' or value == '':
+            return '-'
+        
+        try:
+            # Look for $ followed by number
+            match = re.search(r'\$([\d,]+)', str(value))
+            if match:
+                # Remove commas and convert to number
+                number_str = match.group(1).replace(',', '')
+                return int(number_str)
+        except:
+            pass
+        
+        return '-'
+
     def apply_conditional_formatting(self, filepath):
         """Apply beautiful conditional formatting to the Excel file"""
         try:
