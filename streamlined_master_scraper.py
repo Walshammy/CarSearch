@@ -776,7 +776,7 @@ class StreamlinedMasterScraper:
                     # Number formatting for mileage column
                     for row in range(2, ws.max_row + 1):
                         kms_cell = ws.cell(row=row, column=col)
-                        if isinstance(kms_cell.value, (int, float)):
+                        if isinstance(kms_cell.value, (int, float)) and kms_cell.value != '':
                             kms_cell.number_format = '#,##0'  # Number format with commas
             
             # Auto-adjust column widths with better formatting
