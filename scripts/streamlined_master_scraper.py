@@ -9,7 +9,7 @@ import logging
 import hashlib
 import re
 from openpyxl import load_workbook
-from openpyxl.styles import PatternFill, Font, Alignment
+from openpyxl.styles import PatternFill, Font, Alignment, NamedStyle
 
 class StreamlinedMasterScraper:
     def __init__(self):
@@ -308,6 +308,10 @@ class StreamlinedMasterScraper:
             inactive_id_fill = PatternFill(start_color="F0F0F0", end_color="F0F0F0", fill_type="solid")  # Light gray for inactive ID column
             inactive_row_fill = PatternFill(start_color="F8F8F8", end_color="F8F8F8", fill_type="solid")  # Very light gray for inactive rows
             
+            # Light brand-specific colors
+            toyota_fill = PatternFill(start_color="FFF8DC", end_color="FFF8DC", fill_type="solid")  # Very light cream for Toyota
+            subaru_fill = PatternFill(start_color="F0F8FF", end_color="F0F8FF", fill_type="solid")  # Very light blue for Subaru
+            
             # Style the header row (row 1)
             for col in range(1, ws.max_column + 1):
                 cell = ws.cell(row=1, column=col)
@@ -315,28 +319,63 @@ class StreamlinedMasterScraper:
                 cell.font = header_font
                 cell.alignment = Alignment(horizontal='center', vertical='center')
             
-            # Find the is_active column
+            # Find the is_active and brand columns
             header_row = 1
             is_active_col = None
+            brand_col = None
             for col in range(1, ws.max_column + 1):
                 if ws.cell(row=header_row, column=col).value == 'is_active':
                     is_active_col = col
-                    break
+                elif ws.cell(row=header_row, column=col).value == 'brand':
+                    brand_col = col
             
-            if is_active_col:
+            # Apply formatting based on is_active and brand columns
+            for row in range(2, ws.max_row + 1):
+                # Get brand for this row
+                brand_value = None
+                if brand_col:
+                    brand_value = ws.cell(row=row, column=brand_col).value
+                
+                # Determine brand-specific fill
+                brand_fill = None
+                if brand_value == 'Toyota':
+                    brand_fill = toyota_fill
+                elif brand_value == 'Subaru':
+                    brand_fill = subaru_fill
+                
                 # Apply formatting based on is_active column
-                for row in range(2, ws.max_row + 1):
+                if is_active_col:
                     is_active_cell = ws.cell(row=row, column=is_active_col)
                     
                     if is_active_cell.value == True:
-                        # Active listing - light green ID column only
+                        # Active listing - light green ID column + brand color for brand column
                         ws.cell(row=row, column=1).fill = active_id_fill  # ID column (column 1)
+                        if brand_col and brand_fill:
+                            ws.cell(row=row, column=brand_col).fill = brand_fill
                     else:
                         # Inactive listing - light gray ID column and slightly lighter row
                         ws.cell(row=row, column=1).fill = inactive_id_fill  # ID column
                         # Make the entire row slightly lighter
                         for col in range(1, ws.max_column + 1):
                             ws.cell(row=row, column=col).fill = inactive_row_fill
+                else:
+                    # No is_active column, just apply brand colors
+                    if brand_col and brand_fill:
+                        ws.cell(row=row, column=brand_col).fill = brand_fill
+            
+            # Apply currency formatting to price column
+            price_col = None
+            for col in range(1, ws.max_column + 1):
+                if ws.cell(row=1, column=col).value == 'price':
+                    price_col = col
+                    break
+            
+            if price_col:
+                for row in range(2, ws.max_row + 1):
+                    price_cell = ws.cell(row=row, column=price_col)
+                    # Only apply currency format if the value is a number
+                    if isinstance(price_cell.value, (int, float)) and price_cell.value != '-':
+                        price_cell.number_format = '$#,##0'  # Currency format with $ symbol
             
             # Auto-adjust column widths
             for column in ws.columns:
@@ -377,6 +416,9 @@ class StreamlinedMasterScraper:
         
         # Sort by most recent first
         df = df.sort_values(['scrape_date', 'last_seen'], ascending=[False, False])
+        
+        # Clean and format data for proper Excel number formatting
+        df = self.clean_and_format_data(df)
         
         # Save to Excel (no timestamped copies, just update the master file)
         filepath = self.master_file
