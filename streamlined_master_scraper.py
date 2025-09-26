@@ -49,8 +49,8 @@ class StreamlinedMasterScraper:
         self.onedrive_file = os.path.join(self.onedrive_dir, "86_BRZ_dataset.xlsx")
 
     def generate_unique_id(self, title, location, year):
-        """Generate a unique ID based on listing characteristics"""
-        unique_string = f"{title}_{location}_{year}_{datetime.now().strftime('%Y%m%d')}"
+        """Generate a unique ID based on listing characteristics (without date to maintain consistency)"""
+        unique_string = f"{title}_{location}_{year}"
         return hashlib.md5(unique_string.encode()).hexdigest()[:12].upper()
 
     def extract_listing_data(self, listing_element, car_model):
@@ -497,7 +497,7 @@ class StreamlinedMasterScraper:
             return pd.DataFrame()
 
     def update_dataset(self, new_data):
-        """Update the master dataset with new data"""
+        """Update the master dataset with new data, preserving existing information"""
         # Load existing data
         existing_df = self.load_existing_dataset()
         
@@ -505,16 +505,57 @@ class StreamlinedMasterScraper:
             # Create new dataset
             updated_df = pd.DataFrame(new_data)
         else:
-            # Update existing dataset
+            # Convert new data to DataFrame
             new_df = pd.DataFrame(new_data)
             
-            # Mark existing listings as potentially inactive
-            existing_df['is_active'] = False
+            # Create a copy of existing data to work with
+            updated_df = existing_df.copy()
             
-            # Add new data
-            updated_df = pd.concat([new_df, existing_df], ignore_index=True)
+            # Mark all existing listings as potentially inactive first
+            updated_df['is_active'] = False
             
-            # Remove duplicates based on ID, keeping the most recent
+            # Process each new listing
+            for _, new_row in new_df.iterrows():
+                new_id = new_row['ID']
+                
+                # Check if this listing already exists
+                existing_mask = updated_df['ID'] == new_id
+                existing_indices = updated_df[existing_mask].index
+                
+                if len(existing_indices) > 0:
+                    # Listing exists - update it while preserving important data
+                    existing_idx = existing_indices[0]
+                    
+                    # Preserve important historical data
+                    preserved_price = updated_df.loc[existing_idx, 'price']
+                    preserved_kms = updated_df.loc[existing_idx, 'kms']
+                    preserved_listing_date = updated_df.loc[existing_idx, 'listing_date']
+                    preserved_listing_time = updated_df.loc[existing_idx, 'listing_time']
+                    
+                    # Update the existing row with new data
+                    updated_df.loc[existing_idx] = new_row
+                    
+                    # Restore preserved data if new data doesn't have it
+                    if pd.isna(new_row['price']) or new_row['price'] == 'N/A' or new_row['price'] == '':
+                        updated_df.loc[existing_idx, 'price'] = preserved_price
+                    if pd.isna(new_row['kms']) or new_row['kms'] == 'N/A' or new_row['kms'] == '':
+                        updated_df.loc[existing_idx, 'kms'] = preserved_kms
+                    if pd.isna(new_row['listing_date']) or new_row['listing_date'] == 'N/A':
+                        updated_df.loc[existing_idx, 'listing_date'] = preserved_listing_date
+                    if pd.isna(new_row['listing_time']) or new_row['listing_time'] == 'N/A':
+                        updated_df.loc[existing_idx, 'listing_time'] = preserved_listing_time
+                    
+                    # Mark as active since we found it again
+                    updated_df.loc[existing_idx, 'is_active'] = True
+                    
+                    # Update last_seen timestamp
+                    updated_df.loc[existing_idx, 'last_seen'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    
+                else:
+                    # New listing - add it
+                    updated_df = pd.concat([updated_df, new_row.to_frame().T], ignore_index=True)
+            
+            # Remove any duplicate IDs (keep the most recent)
             updated_df = updated_df.drop_duplicates(subset=['ID'], keep='first')
         
         return updated_df
