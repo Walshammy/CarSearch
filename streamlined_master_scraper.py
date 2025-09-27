@@ -820,19 +820,23 @@ class StreamlinedMasterScraper:
                 cell.font = header_font
                 cell.alignment = Alignment(horizontal='center', vertical='center')
             
+            # Set compact row heights for better visibility
+            for row in range(1, ws.max_row + 1):
+                ws.row_dimensions[row].height = 15  # Compact row height
+            
             # Set default alignment for all data cells
             for row in range(2, ws.max_row + 1):
                 for col in range(1, ws.max_column + 1):
                     cell = ws.cell(row=row, column=col)
                     column_letter = cell.column_letter
                     
-                    # Set alignment based on column type
+                    # Set alignment based on column type - all centered for compact view
                     if column_letter in ['A', 'C', 'D', 'E', 'H', 'J', 'T']:  # ID, Year, Kms, Price, Is auction, Is dealer, Is active
                         cell.alignment = Alignment(horizontal='center', vertical='center')
                     elif column_letter in ['B', 'F', 'G', 'I', 'L', 'M', 'U', 'V', 'W', 'Y', 'Z', 'AA', 'AB']:  # Text columns
                         cell.alignment = Alignment(horizontal='left', vertical='center')
                     elif column_letter in ['K', 'N', 'O', 'P', 'Q', 'R', 'S', 'X']:  # Title and URL columns (long text)
-                        cell.alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
+                        cell.alignment = Alignment(horizontal='left', vertical='center', wrap_text=False)  # No wrap for compact view
                     else:
                         cell.alignment = Alignment(horizontal='left', vertical='center')
             
@@ -953,13 +957,13 @@ class StreamlinedMasterScraper:
                     'J': 10,  # Is dealer column
                     'K': 30,  # Title column
                     'L': 15,  # Car model column
-                    'M': 25,  # Primary search term column
-                    'N': 50,  # Primary TradeMe URL column
-                    'O': 50,  # Primary Google URL column
-                    'P': 40,  # Search terms column
-                    'Q': 50,  # TradeMe search URLs column
-                    'R': 50,  # Google search URLs column
-                    'S': 50,  # Google Images URLs column
+                    'M': 20,  # Primary search term column
+                    'N': 30,  # Primary TradeMe URL column
+                    'O': 30,  # Primary Google URL column
+                    'P': 25,  # Search terms column
+                    'Q': 30,  # TradeMe search URLs column
+                    'R': 30,  # Google search URLs column
+                    'S': 30,  # Google Images URLs column
                     'T': 10,  # Is active column
                     'U': 15,  # Last seen column
                     'V': 15,  # Scrape date column
@@ -980,10 +984,10 @@ class StreamlinedMasterScraper:
                 
                 ws.column_dimensions[column_letter].width = final_width
                 
-                # Enable text wrapping for long content columns
-                if column_letter in ['K', 'Q']:  # Title and URL columns
-                    for cell in column:
-                        cell.alignment = Alignment(wrap_text=True, vertical='top')
+                # No text wrapping for compact view - keep all rows same height
+                # if column_letter in ['K', 'Q']:  # Title and URL columns
+                #     for cell in column:
+                #         cell.alignment = Alignment(wrap_text=True, vertical='top')
             
             wb.save(filepath)
             self.logger.info("Applied beautiful conditional formatting to Excel file")
