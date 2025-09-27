@@ -53,6 +53,80 @@ class StreamlinedMasterScraper:
         unique_string = f"{title}_{location}_{year}"
         return hashlib.md5(unique_string.encode()).hexdigest()[:12].upper()
 
+    def generate_search_terms(self, title, location, year, brand, car_model):
+        """Generate search terms and URLs to help find the original listing"""
+        try:
+            # Clean up the title for better search results
+            clean_title = title.replace('N/A', '').strip()
+            if not clean_title:
+                clean_title = f"{brand} {car_model}"
+            
+            # Create various search term combinations
+            search_terms = []
+            
+            # Basic search terms
+            if year != 'N/A' and year:
+                search_terms.append(f"{brand} {car_model} {year}")
+                search_terms.append(f"{year} {brand} {car_model}")
+            
+            # Include location in search
+            if location != 'N/A' and location:
+                search_terms.append(f"{brand} {car_model} {location}")
+                if year != 'N/A' and year:
+                    search_terms.append(f"{brand} {car_model} {year} {location}")
+            
+            # Use original title if it's descriptive
+            if clean_title and len(clean_title) > 10:
+                search_terms.append(clean_title)
+                if location != 'N/A' and location:
+                    search_terms.append(f"{clean_title} {location}")
+            
+            # Remove duplicates and limit to 5 best search terms
+            unique_terms = list(dict.fromkeys(search_terms))[:5]
+            
+            # Create TradeMe search URLs
+            trademe_urls = []
+            for term in unique_terms[:3]:  # Top 3 terms for TradeMe
+                encoded_term = term.replace(' ', '+')
+                trademe_url = f"https://www.trademe.co.nz/a/motors/cars/search?search_string={encoded_term}"
+                trademe_urls.append(trademe_url)
+            
+            # Create Google search URLs
+            google_urls = []
+            for term in unique_terms[:3]:  # Top 3 terms for Google
+                encoded_term = term.replace(' ', '+')
+                google_url = f"https://www.google.com/search?q={encoded_term}+site:trademe.co.nz"
+                google_urls.append(google_url)
+            
+            # Create Google Images search URLs
+            google_images_urls = []
+            for term in unique_terms[:2]:  # Top 2 terms for Google Images
+                encoded_term = term.replace(' ', '+')
+                google_images_url = f"https://www.google.com/search?q={encoded_term}+site:trademe.co.nz&tbm=isch"
+                google_images_urls.append(google_images_url)
+            
+            return {
+                'search_terms': ' | '.join(unique_terms),
+                'trademe_search_urls': ' | '.join(trademe_urls),
+                'google_search_urls': ' | '.join(google_urls),
+                'google_images_urls': ' | '.join(google_images_urls),
+                'primary_search_term': unique_terms[0] if unique_terms else f"{brand} {car_model}",
+                'primary_trademe_url': trademe_urls[0] if trademe_urls else '',
+                'primary_google_url': google_urls[0] if google_urls else ''
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error generating search terms: {e}")
+            return {
+                'search_terms': f"{brand} {car_model}",
+                'trademe_search_urls': '',
+                'google_search_urls': '',
+                'google_images_urls': '',
+                'primary_search_term': f"{brand} {car_model}",
+                'primary_trademe_url': '',
+                'primary_google_url': ''
+            }
+
     def extract_listing_data(self, listing_element, car_model):
         """Extract comprehensive data from a single listing element with intelligent parsing"""
         try:
@@ -269,6 +343,10 @@ class StreamlinedMasterScraper:
             
             # Generate unique ID
             data['ID'] = self.generate_unique_id(data['title'], data['location'], data['year'])
+            
+            # Generate search terms and URLs for finding the original listing
+            search_data = self.generate_search_terms(data['title'], data['location'], data['year'], data['brand'], data['car_model'])
+            data.update(search_data)
             
             # Determine if it's an auction
             is_auction = any(word in full_text.lower() for word in ['auction', 'bid', 'reserve', 'ending'])
@@ -747,11 +825,11 @@ class StreamlinedMasterScraper:
                     column_letter = cell.column_letter
                     
                     # Set alignment based on column type
-                    if column_letter in ['A', 'C', 'D', 'E', 'H', 'J', 'M']:  # ID, Year, Kms, Price, Is auction, Is dealer, Is active
+                    if column_letter in ['A', 'C', 'D', 'E', 'H', 'J', 'T']:  # ID, Year, Kms, Price, Is auction, Is dealer, Is active
                         cell.alignment = Alignment(horizontal='center', vertical='center')
-                    elif column_letter in ['B', 'F', 'G', 'I', 'L', 'N', 'O', 'P', 'R', 'S', 'T', 'U']:  # Text columns
+                    elif column_letter in ['B', 'F', 'G', 'I', 'L', 'M', 'U', 'V', 'W', 'Y', 'Z', 'AA', 'AB']:  # Text columns
                         cell.alignment = Alignment(horizontal='left', vertical='center')
-                    elif column_letter in ['K', 'Q']:  # Title and URL columns (long text)
+                    elif column_letter in ['K', 'N', 'O', 'P', 'Q', 'R', 'S', 'X']:  # Title and URL columns (long text)
                         cell.alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
                     else:
                         cell.alignment = Alignment(horizontal='left', vertical='center')
@@ -873,15 +951,22 @@ class StreamlinedMasterScraper:
                     'J': 10,  # Is dealer column
                     'K': 30,  # Title column
                     'L': 15,  # Car model column
-                    'M': 10,  # Is active column
-                    'N': 15,  # Last seen column
-                    'O': 15,  # Scrape date column
-                    'P': 15,  # Scrape time column
-                    'Q': 50,  # Listing URL column
-                    'R': 15,  # Listing ID column
-                    'S': 12,  # Transmission column
-                    'T': 12,  # Fuel type column
-                    'U': 15   # Body style column
+                    'M': 25,  # Primary search term column
+                    'N': 50,  # Primary TradeMe URL column
+                    'O': 50,  # Primary Google URL column
+                    'P': 40,  # Search terms column
+                    'Q': 50,  # TradeMe search URLs column
+                    'R': 50,  # Google search URLs column
+                    'S': 50,  # Google Images URLs column
+                    'T': 10,  # Is active column
+                    'U': 15,  # Last seen column
+                    'V': 15,  # Scrape date column
+                    'W': 15,  # Scrape time column
+                    'X': 50,  # Listing URL column
+                    'Y': 15,  # Listing ID column
+                    'Z': 12,  # Transmission column
+                    'AA': 12, # Fuel type column
+                    'AB': 15  # Body style column
                 }
                 
                 # Get the minimum width for this column
@@ -914,6 +999,8 @@ class StreamlinedMasterScraper:
         column_order = [
             'ID', 'brand', 'year', 'kms', 'price', 'location', 'price_type', 
             'is_auction', 'seller_type', 'is_dealer', 'title', 'car_model', 
+            'primary_search_term', 'primary_trademe_url', 'primary_google_url',
+            'search_terms', 'trademe_search_urls', 'google_search_urls', 'google_images_urls',
             'listing_time', 'listing_date', 'auction_end_time', 'auction_end_date', 
             'listing_end_time', 'listing_end_date', 'is_active', 'last_seen', 'scrape_date', 'scrape_time', 
             'listing_url', 'listing_id', 'transmission', 'fuel_type', 'body_style', 'notes'
