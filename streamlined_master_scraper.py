@@ -53,6 +53,53 @@ class StreamlinedMasterScraper:
         unique_string = f"{title}_{location}_{year}"
         return hashlib.md5(unique_string.encode()).hexdigest()[:12].upper()
 
+    def categorize_listing(self, year, price):
+        """Categorize listing based on buying guide criteria"""
+        try:
+            # Convert year to int if possible
+            year_int = None
+            if year and year != 'N/A':
+                try:
+                    year_int = int(year)
+                except (ValueError, TypeError):
+                    pass
+            
+            # Convert price to int if possible
+            price_int = None
+            if price and price != 'N/A' and price != '':
+                try:
+                    if isinstance(price, str):
+                        # Remove $ and commas
+                        price_str = str(price).replace('$', '').replace(',', '')
+                        price_int = int(price_str)
+                    else:
+                        price_int = int(price)
+                except (ValueError, TypeError):
+                    pass
+            
+            # Categorize based on year and price
+            if year_int:
+                if year_int in [2012, 2013]:
+                    return 'avoid'  # Avoid 2012-2013 due to valve spring recall
+                elif year_int in [2015, 2016]:
+                    if price_int and 18000 <= price_int <= 23000:
+                        return 'steal'  # Perfect: 2015-2016 in budget
+                    else:
+                        return 'optimal'  # 2015-2016 but outside budget
+                elif year_int == 2014:
+                    if price_int and 18000 <= price_int <= 23000:
+                        return 'budget'  # 2014 in budget (backup option)
+                    else:
+                        return 'optimal'  # 2014 but outside budget
+                else:
+                    return 'other'  # Other years
+            else:
+                return 'other'  # No year data
+                
+        except Exception as e:
+            self.logger.error(f"Error categorizing listing: {e}")
+            return 'other'
+
     def generate_search_terms(self, title, location, year, brand, car_model):
         """Generate search terms and URLs to help find the original listing"""
         try:
@@ -813,6 +860,12 @@ class StreamlinedMasterScraper:
             toyota_fill = PatternFill(start_color="FFF8DC", end_color="FFF8DC", fill_type="solid")  # Very light cream for Toyota
             subaru_fill = PatternFill(start_color="F0F8FF", end_color="F0F8FF", fill_type="solid")  # Very light blue for Subaru
             
+            # Special formatting for optimal choices and steals
+            steal_fill = PatternFill(start_color="90EE90", end_color="90EE90", fill_type="solid")  # Light green for steals
+            optimal_fill = PatternFill(start_color="FFE4B5", end_color="FFE4B5", fill_type="solid")  # Light orange for optimal choices
+            avoid_fill = PatternFill(start_color="FFB6C1", end_color="FFB6C1", fill_type="solid")  # Light pink for avoid
+            budget_fill = PatternFill(start_color="E6E6FA", end_color="E6E6FA", fill_type="solid")  # Light purple for budget range
+            
             # Style the header row (row 1)
             for col in range(1, ws.max_column + 1):
                 cell = ws.cell(row=1, column=col)
@@ -850,12 +903,31 @@ class StreamlinedMasterScraper:
                 elif ws.cell(row=header_row, column=col).value == 'brand':
                     brand_col = col
             
-            # Apply formatting based on is_active and brand columns
+            # Find additional columns for categorization
+            year_col = None
+            price_col = None
+            for col in range(1, ws.max_column + 1):
+                if ws.cell(row=1, column=col).value == 'year':
+                    year_col = col
+                elif ws.cell(row=1, column=col).value == 'price':
+                    price_col = col
+            
+            # Apply formatting based on is_active, brand, year, and price columns
             for row in range(2, ws.max_row + 1):
-                # Get brand for this row
+                # Get values for this row
                 brand_value = None
+                year_value = None
+                price_value = None
+                
                 if brand_col:
                     brand_value = ws.cell(row=row, column=brand_col).value
+                if year_col:
+                    year_value = ws.cell(row=row, column=year_col).value
+                if price_col:
+                    price_value = ws.cell(row=row, column=price_col).value
+                
+                # Determine category based on buying guide criteria
+                category = self.categorize_listing(year_value, price_value)
                 
                 # Determine brand-specific fill
                 brand_fill = None
@@ -864,15 +936,33 @@ class StreamlinedMasterScraper:
                 elif brand_value == 'Subaru':
                     brand_fill = subaru_fill
                 
-                # Apply formatting based on is_active column
+                # Apply formatting based on category and is_active column
                 if is_active_col:
                     is_active_cell = ws.cell(row=row, column=is_active_col)
                     
                     if is_active_cell.value == True:
-                        # Active listing - light green ID column + brand color for brand column
-                        ws.cell(row=row, column=1).fill = active_id_fill  # ID column (column 1)
-                        if brand_col and brand_fill:
-                            ws.cell(row=row, column=brand_col).fill = brand_fill
+                        # Active listing - apply category-based formatting
+                        if category == 'steal':
+                            # STEAL: 2015-2016, 18-23k budget, 80-140k km
+                            for col in range(1, ws.max_column + 1):
+                                ws.cell(row=row, column=col).fill = steal_fill
+                        elif category == 'optimal':
+                            # OPTIMAL: 2015-2016, any price, or 2014 in budget
+                            for col in range(1, ws.max_column + 1):
+                                ws.cell(row=row, column=col).fill = optimal_fill
+                        elif category == 'budget':
+                            # BUDGET: Within 18-23k range but not optimal year
+                            for col in range(1, ws.max_column + 1):
+                                ws.cell(row=row, column=col).fill = budget_fill
+                        elif category == 'avoid':
+                            # AVOID: 2012-2013 models
+                            for col in range(1, ws.max_column + 1):
+                                ws.cell(row=row, column=col).fill = avoid_fill
+                        else:
+                            # Default: light green ID column + brand color for brand column
+                            ws.cell(row=row, column=1).fill = active_id_fill  # ID column (column 1)
+                            if brand_col and brand_fill:
+                                ws.cell(row=row, column=brand_col).fill = brand_fill
                     else:
                         # Inactive listing - light gray ID column and slightly lighter row
                         ws.cell(row=row, column=1).fill = inactive_id_fill  # ID column
@@ -989,11 +1079,51 @@ class StreamlinedMasterScraper:
                 #     for cell in column:
                 #         cell.alignment = Alignment(wrap_text=True, vertical='top')
             
+            # Add legend for color coding
+            self.add_color_legend(ws)
+            
             wb.save(filepath)
             self.logger.info("Applied beautiful conditional formatting to Excel file")
             
         except Exception as e:
             self.logger.error(f"Error applying conditional formatting: {e}")
+
+    def add_color_legend(self, ws):
+        """Add a color legend to explain the formatting"""
+        try:
+            # Find the last row with data
+            last_row = ws.max_row
+            
+            # Add legend starting 2 rows after the data
+            legend_start_row = last_row + 3
+            
+            # Legend title
+            ws.cell(row=legend_start_row, column=1, value="COLOR CODING LEGEND:")
+            ws.cell(row=legend_start_row, column=1).font = Font(bold=True, size=12)
+            
+            # Legend entries
+            legend_entries = [
+                ("🟢 STEAL", "2015-2016 models in 18-23k budget - PERFECT CHOICE!"),
+                ("🟠 OPTIMAL", "2015-2016 models (any price) or 2014 in budget - GREAT CHOICE!"),
+                ("🟣 BUDGET", "2014 models in 18-23k budget - BACKUP OPTION"),
+                ("🔴 AVOID", "2012-2013 models - Valve spring recall issues!"),
+                ("⚪ OTHER", "Other years or no data - Check individually")
+            ]
+            
+            for i, (color, description) in enumerate(legend_entries):
+                row = legend_start_row + 1 + i
+                ws.cell(row=row, column=1, value=color)
+                ws.cell(row=row, column=2, value=description)
+                ws.cell(row=row, column=1).font = Font(bold=True)
+                ws.cell(row=row, column=2).font = Font(size=10)
+            
+            # Add buying guide reference
+            guide_row = legend_start_row + len(legend_entries) + 2
+            ws.cell(row=guide_row, column=1, value="Based on Toyota 86/Subaru BRZ Reliability-Focused Buying Guide")
+            ws.cell(row=guide_row, column=1).font = Font(italic=True, size=9)
+            
+        except Exception as e:
+            self.logger.error(f"Error adding color legend: {e}")
 
     def save_master_dataset(self, df):
         """Save the master dataset with proper formatting"""
