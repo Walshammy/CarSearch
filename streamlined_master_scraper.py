@@ -344,9 +344,8 @@ class StreamlinedMasterScraper:
             # Generate unique ID
             data['ID'] = self.generate_unique_id(data['title'], data['location'], data['year'])
             
-            # Generate search terms and URLs for finding the original listing
-            search_data = self.generate_search_terms(data['title'], data['location'], data['year'], data['brand'], data['car_model'])
-            data.update(search_data)
+            # Set car_model before generating search terms
+            data['car_model'] = car_model
             
             # Determine if it's an auction
             is_auction = any(word in full_text.lower() for word in ['auction', 'bid', 'reserve', 'ending'])
@@ -489,7 +488,6 @@ class StreamlinedMasterScraper:
                         break
             
             # Additional fields
-            data['car_model'] = car_model
             data['listing_url'] = 'N/A'
             data['listing_id'] = 'N/A'
             data['listing_time'] = listing_time
@@ -502,6 +500,10 @@ class StreamlinedMasterScraper:
             data['scrape_time'] = datetime.now().strftime('%H:%M:%S')
             data['last_seen'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             data['is_active'] = True
+            
+            # Generate search terms and URLs for finding the original listing
+            search_data = self.generate_search_terms(data['title'], data['location'], data['year'], data['brand'], data['car_model'])
+            data.update(search_data)
             
             # Add notes column for any unclear data
             if notes:
